@@ -1,0 +1,6 @@
+{
+  "Apache HTTP Server": "APACHE-HTTP_Server",
+  "Nginx": "NGINX",
+  "ThinkPHP": "ThinkPHP",
+  "ThinkAdmin": "ThinkAdmin"
+}

@@ -1,0 +1,24 @@
+{
+  "_comment": "extract_ranges_from_nvd(log4shell_nvd.json, 'Apache Log4j2') 的期望输出。前 3 条是带边界的真实区间，后 4 条是从精确版本 CPE 退化来的闭区间。已过滤掉 siemens 分组（产品不匹配）与 vulnerable=false 条目。",
+  "affected_ranges": [
+    {"start": "2.0.1", "start_inclusive": true, "end": "2.3.1", "end_inclusive": false},
+    {"start": "2.4.0", "start_inclusive": true, "end": "2.12.2", "end_inclusive": false},
+    {"start": "2.13.0", "start_inclusive": true, "end": "2.15.0", "end_inclusive": false},
+    {"start": "2.0", "start_inclusive": true, "end": "2.0", "end_inclusive": true},
+    {"start": "2.0-beta9", "start_inclusive": true, "end": "2.0-beta9", "end_inclusive": true},
+    {"start": "2.0-rc1", "start_inclusive": true, "end": "2.0-rc1", "end_inclusive": true},
+    {"start": "2.0-rc2", "start_inclusive": true, "end": "2.0-rc2", "end_inclusive": true}
+  ],
+  "warnings": [],
+  "affected_ranges_by_product": {
+    "apache:log4j": [
+      {"start": "2.0.1", "start_inclusive": true, "end": "2.3.1", "end_inclusive": false},
+      {"start": "2.4.0", "start_inclusive": true, "end": "2.12.2", "end_inclusive": false},
+      {"start": "2.13.0", "start_inclusive": true, "end": "2.15.0", "end_inclusive": false},
+      {"start": "2.0", "start_inclusive": true, "end": "2.0", "end_inclusive": true},
+      {"start": "2.0-beta9", "start_inclusive": true, "end": "2.0-beta9", "end_inclusive": true},
+      {"start": "2.0-rc1", "start_inclusive": true, "end": "2.0-rc1", "end_inclusive": true},
+      {"start": "2.0-rc2", "start_inclusive": true, "end": "2.0-rc2", "end_inclusive": true}
+    ]
+  }
+}

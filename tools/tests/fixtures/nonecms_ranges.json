@@ -1,0 +1,7 @@
+{
+  "_comment": "extract_ranges_from_nvd(nonecms_nvd.json, 'NoneCms') 的期望输出。只有精确版本时生成 start==end 的退化闭区间；产品匹配上，故无 warning，且单产品不输出分组。",
+  "affected_ranges": [
+    {"start": "1.3.0", "start_inclusive": true, "end": "1.3.0", "end_inclusive": true}
+  ],
+  "warnings": []
+}

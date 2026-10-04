@@ -1,0 +1,7 @@
+{
+  "government": ["政府", "gov", "government"],
+  "education": ["教育", "edu", "education", "university", "college", "school", "academy"],
+  "finance": ["银行", "bank", "金融", "financial", "保险", "insurance"],
+  "medical": ["医院", "hospital", "医疗", "medical"],
+  "military_law": ["军事", "mil", "army", "police", "公安"]
+}

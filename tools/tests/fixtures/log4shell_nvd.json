@@ -1,0 +1,65 @@
+{
+  "_comment": "CVE-2021-44228 的 cpeMatch 结构精简快照。字段名与取值来自真实 nvd_get_cve 返回，只保留提取器用到的部分。含四类形态：带起止边界 / 只有上界 / 精确版本 / vulnerable=false。",
+  "cves": [
+    {
+      "cveId": "CVE-2021-44228",
+      "configurationNodes": [
+        {
+          "groupIndex": 0,
+          "nodeOperator": "OR",
+          "cpeMatch": [
+            {
+              "vulnerable": true,
+              "criteria": "cpe:2.3:a:apache:log4j:*:*:*:*:*:*:*:*",
+              "versionStartIncluding": "2.0.1",
+              "versionEndExcluding": "2.3.1"
+            },
+            {
+              "vulnerable": true,
+              "criteria": "cpe:2.3:a:apache:log4j:*:*:*:*:*:*:*:*",
+              "versionStartIncluding": "2.4.0",
+              "versionEndExcluding": "2.12.2"
+            },
+            {
+              "vulnerable": true,
+              "criteria": "cpe:2.3:a:apache:log4j:*:*:*:*:*:*:*:*",
+              "versionStartIncluding": "2.13.0",
+              "versionEndExcluding": "2.15.0"
+            },
+            {
+              "vulnerable": true,
+              "criteria": "cpe:2.3:a:apache:log4j:2.0:-:*:*:*:*:*:*"
+            },
+            {
+              "vulnerable": true,
+              "criteria": "cpe:2.3:a:apache:log4j:2.0:beta9:*:*:*:*:*:*"
+            },
+            {
+              "vulnerable": true,
+              "criteria": "cpe:2.3:a:apache:log4j:2.0:rc1:*:*:*:*:*:*"
+            },
+            {
+              "vulnerable": true,
+              "criteria": "cpe:2.3:a:apache:log4j:2.0:rc2:*:*:*:*:*:*"
+            }
+          ]
+        },
+        {
+          "groupIndex": 1,
+          "nodeOperator": "OR",
+          "cpeMatch": [
+            {
+              "vulnerable": true,
+              "criteria": "cpe:2.3:o:siemens:spectrum_power_4:*:*:*:*:*:*:*:*",
+              "versionEndExcluding": "4.70"
+            },
+            {
+              "vulnerable": false,
+              "criteria": "cpe:2.3:h:siemens:spectrum_power_4:-:*:*:*:*:*:*:*"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
