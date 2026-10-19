@@ -23,10 +23,17 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import alive_filter               # noqa: E402
+import census                     # noqa: E402
+import fofa_cache                 # noqa: E402
+import gate                       # noqa: E402
 import probe_inputs               # noqa: E402
+import run_state                  # noqa: E402
 import scope                      # noqa: E402
 import score                      # noqa: E402
 import version_compare as vc      # noqa: E402
+import version_probe              # noqa: E402
+import waf_batch                  # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -341,7 +348,9 @@ check("fofa_title_hit: 空产品且空指纹不命中",
       score.fofa_title_hit("", "", "随便什么标题"), False)
 
 
-def _run_score_full(td, fofa_title, httpx_title=''):
+def _run_score_full(td, fofa_title, httpx_title='', tech=None,
+                    fingerprint='ThinkAdmin', version=None,
+                    cdn_missing=True, waf_missing=True):
     """完整跑一次 score.py，返回解析后的 targets.json 列表。"""
     raw = os.path.join(td, 'raw.json')
     hx = os.path.join(td, 'httpx.jsonl')
@@ -349,15 +358,19 @@ def _run_score_full(td, fofa_title, httpx_title=''):
     out = os.path.join(td, 'out.json')
     with open(raw, 'w', encoding='utf-8') as f:
         json.dump([{'ip': '1.2.3.4', 'port': '80', 'host': 'x.com',
-                    'protocol': 'http', 'title': fofa_title}], f)
+                    'protocol': 'http', 'title': fofa_title,
+                    'country': 'CN'}], f)
     with open(hx, 'w', encoding='utf-8') as f:
         f.write(json.dumps({'input': 'x.com:80', 'status_code': 302,
-                            'title': httpx_title, 'tech': [],
+                            'title': httpx_title, 'tech': tech or [],
                             'location': '/admin/login.html'}) + '\n')
+    ranges = []
+    if version:
+        ranges = [{'start': version, 'start_inclusive': True,
+                   'end': version, 'end_inclusive': True}]
     with open(ctx, 'w', encoding='utf-8') as f:
-        json.dump({'product': 'ThinkAdmin', 'matched_fingerprint': 'ThinkAdmin',
-                   'affected_ranges': [{'start': '6.0', 'start_inclusive': True,
-                                        'end': '6.0', 'end_inclusive': True}]}, f)
+        json.dump({'product': 'ThinkAdmin', 'matched_fingerprint': fingerprint,
+                   'affected_ranges': ranges}, f)
     subprocess.run([sys.executable, _SCORE,
                     '--raw', raw, '--httpx', hx,
                     '--cdn', os.path.join(td, 'nocdn.jsonl'),
@@ -370,20 +383,395 @@ def _run_score_full(td, fofa_title, httpx_title=''):
 
 
 with tempfile.TemporaryDirectory() as _td3:
-    _rows = _run_score_full(_td3, '系统登录 · ThinkAdmin')
-    check("E2E: FOFA 标题命中 + httpx 空标题 -> 1 条输出", len(_rows), 1)
-    check("E2E: match_score=50",
-          _rows[0]['match_score'] if _rows else None, 50)
-    check("E2E: classification=needs_verification",
+    # title= 查询自证：标题命中和标题非空都不再计分 -> 低于门槛被剔除
+    _rows = _run_score_full(_td3, '系统登录 · ThinkAdmin',
+                            fingerprint='title="ThinkAdmin"')
+    check("E2E: title= 查询自证 -> 0 条输出", len(_rows), 0)
+
+    # 独立强证据 tech 命中 -> 40 分，进入 needs_verification
+    _rows = _run_score_full(_td3, '系统登录 · ThinkAdmin',
+                            fingerprint='title="ThinkAdmin"',
+                            tech=['ThinkAdmin'])
+    check("E2E: tech 命中 -> 1 条输出", len(_rows), 1)
+    check("E2E: tech 命中 -> match_score=40",
+          _rows[0]['match_score'] if _rows else None, 40)
+    check("E2E: tech 命中 -> needs_verification",
           _rows[0]['classification'] if _rows else None, 'needs_verification')
+    check("E2E: tech 命中 -> tier B",
+          _rows[0]['confidence_tier'] if _rows else None, 'B')
     check("E2E: version_status=unknown",
           _rows[0]['version_status'] if _rows else None, 'unknown')
-    _rows = _run_score_full(_td3, '系统登录 · 某某系统')
-    check("E2E: 标题不含产品 -> 空输出（保守不放水）", len(_rows), 0)
+    check("E2E: 缺失 waf/cdn -> reachability=not_tested",
+          _rows[0]['reachability'] if _rows else None, 'not_tested')
+    check("E2E: 缺失 waf/cdn -> verification_cost=None",
+          _rows[0]['verification_cost'] if _rows else None, None)
+
+    # tech + live title（title= 查询下 live 标题仍算弱证据）
     _rows = _run_score_full(_td3, '系统登录 · ThinkAdmin',
-                            httpx_title='系统登录 · ThinkAdmin')
-    check("E2E: httpx 标题也在时标题证据不叠加（仍 50）",
+                            fingerprint='title="ThinkAdmin"',
+                            tech=['ThinkAdmin'], httpx_title='ThinkAdmin')
+    check("E2E: tech + live title -> 50",
           _rows[0]['match_score'] if _rows else None, 50)
+
+    # tech + 版本命中 -> 100（clamp）+ tier A
+    _rows = _run_score_full(_td3, '系统登录 · ThinkAdmin',
+                            fingerprint='title="ThinkAdmin"',
+                            tech=['ThinkAdmin:6.0'], version='6.0')
+    check("E2E: tech + affected -> match_score=90",
+          _rows[0]['match_score'] if _rows else None, 90)
+    check("E2E: tech + affected -> likely_affected",
+          _rows[0]['classification'] if _rows else None, 'likely_affected')
+    check("E2E: tech + affected -> tier A",
+          _rows[0]['confidence_tier'] if _rows else None, 'A')
+
+# ======================================================================
+# 11. alive_filter：用 httpx 结果过滤 wafw00f 输入
+# ======================================================================
+print()
+print("=" * 72)
+print("11. alive_filter（wafw00f 输入过滤）")
+print("=" * 72)
+
+with tempfile.TemporaryDirectory() as _td4:
+    _hx = os.path.join(_td4, 'httpx.jsonl')
+    _urls = os.path.join(_td4, 'urls.txt')
+    _out = os.path.join(_td4, 'waf_input.txt')
+    with open(_hx, 'w', encoding='utf-8') as f:
+        f.write(json.dumps({'input': '1.2.3.4:80'}) + '\n')
+        f.write(json.dumps({'input': '5.6.7.8:443', 'failed': False}) + '\n')
+        f.write(json.dumps({'input': '9.9.9.9:8080', 'failed': True}) + '\n')
+        f.write('这一行不是 json\n')
+    with open(_urls, 'w', encoding='utf-8', newline='\n') as f:
+        f.write('http://1.2.3.4:80\n')       # 存活 -> 保留
+        f.write('https://9.9.9.9:8080\n')    # httpx 判死 -> 剔除
+        f.write('https://5.6.7.8:443\n')     # 存活 -> 保留
+        f.write('http://10.0.0.1:80\n')      # 不在 httpx 结果里 -> 剔除
+
+    check("alive_filter: 退出码 0",
+          alive_filter.main(['--httpx', _hx, '--urls', _urls, '--output', _out]), 0)
+    with open(_out, encoding='utf-8') as f:
+        _kept = [ln.strip() for ln in f if ln.strip()]
+    check("alive_filter: 只留存活且保序（坏行忽略、failed 剔除）",
+          _kept, ['http://1.2.3.4:80', 'https://5.6.7.8:443'])
+    check("alive_filter: httpx 文件缺失 -> 退出码 2",
+          alive_filter.main(['--httpx', os.path.join(_td4, 'nope.jsonl'),
+                             '--urls', _urls, '--output', _out]), 2)
+    check("alive_filter: URL 列表缺失 -> 退出码 2",
+          alive_filter.main(['--httpx', _hx,
+                             '--urls', os.path.join(_td4, 'nope.txt'),
+                             '--output', _out]), 2)
+
+# ======================================================================
+# 12. build_hint：verify_path 在三档 hint 里都要出现
+# ======================================================================
+print()
+print("=" * 72)
+print("12. build_hint（verify_path 追加）")
+print("=" * 72)
+
+_VP = '/index/Search/index.html?keyword='
+_h_affected_waf = score.build_hint(True, 'affected', _VP)
+_h_affected = score.build_hint(False, 'affected', _VP)
+_h_unknown_waf = score.build_hint(True, 'unknown', _VP)
+_h_unknown = score.build_hint(False, 'unknown', _VP)
+
+check("hint affected+waf 含验证路径", _VP in _h_affected_waf, True)
+check("hint affected 含验证路径", _VP in _h_affected, True)
+# 这条是本次修复的回归点：unknown 分支此前会丢掉 verify_path
+check("hint unknown+waf 含验证路径", _VP in _h_unknown_waf, True)
+check("hint unknown 含验证路径", _VP in _h_unknown, True)
+check("hint unknown 无 verify_path 时不出现后缀",
+      '建议验证路径' in score.build_hint(False, 'unknown', ''), False)
+check("hint unknown 基线措辞不变",
+      score.build_hint(False, 'unknown', ''), '需手动确认指纹后再核验')
+
+# verify_path_inferred：推断路径必须带「（推测，需确认）」标记
+check("hint 推断路径带推测标记",
+      '（推测，需确认）' in score.build_hint(False, 'unknown', _VP, True), True)
+check("hint 实证路径不带推测标记",
+      '（推测，需确认）' in _h_unknown, False)
+check("hint 空 verify_path 即使 inferred=True 也无后缀",
+      '建议验证路径' in score.build_hint(False, 'unknown', '', True), False)
+
+# 端到端：context.json 的 verify_path_inferred 要一路传到 hint
+with tempfile.TemporaryDirectory() as _td5:
+    _r5 = os.path.join(_td5, 'raw.json')
+    _x5 = os.path.join(_td5, 'httpx.jsonl')
+    _c5 = os.path.join(_td5, 'ctx.json')
+    _o5 = os.path.join(_td5, 'out.json')
+    with open(_r5, 'w', encoding='utf-8') as f:
+        json.dump([{'ip': '1.2.3.4', 'port': '80', 'host': 'x.com',
+                    'protocol': 'http', 'title': 'ThinkAdmin'}], f)
+    with open(_x5, 'w', encoding='utf-8') as f:
+        f.write(json.dumps({'input': 'x.com:80', 'status_code': 200,
+                            'title': 'ThinkAdmin',
+                            'tech': ['ThinkAdmin']}) + '\n')
+    with open(_c5, 'w', encoding='utf-8') as f:
+        json.dump({'product': 'ThinkAdmin', 'matched_fingerprint': 'ThinkAdmin',
+                   'affected_ranges': [], 'verify_path': '/admin/x?a=',
+                   'verify_path_inferred': True}, f)
+    subprocess.run([sys.executable, _SCORE, '--raw', _r5, '--httpx', _x5,
+                    '--cdn', os.path.join(_td5, 'nocdn.jsonl'),
+                    '--waf', os.path.join(_td5, 'nowaf.json'),
+                    '--context', _c5, '--output', _o5],
+                   capture_output=True, text=True,
+                   encoding='utf-8', errors='replace')
+    with open(_o5, encoding='utf-8') as f:
+        _rows5 = json.load(f)
+    check("E2E: context.verify_path_inferred 传到 hint（带推测标记）",
+          '（推测，需确认）' in (_rows5[0]['verify_hint'] if _rows5 else ''),
+          True)
+
+# ======================================================================
+# 13. 证据独立性 / tier / 分层选择 / 证据包
+# ======================================================================
+print()
+print("=" * 72)
+print("13. 证据独立性与交付分级")
+print("=" * 72)
+
+check("fingerprint_kind: title 查询",
+      score.fingerprint_kind('title="Kofax"'), 'title')
+check("fingerprint_kind: app 查询",
+      score.fingerprint_kind('app="VeraSMART"'), 'app')
+check("fingerprint_kind: 无等号视为 unknown",
+      score.fingerprint_kind('VeraSMART'), 'unknown')
+check("title 查询的 FOFA 标题命中不算独立",
+      score.fofa_title_is_independent('title="Kofax"'), False)
+check("app 查询的 FOFA 标题命中算独立",
+      score.fofa_title_is_independent('app="VeraSMART"'), True)
+
+_FP_RULES = score.load_json(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                 'fingerprint_rules.json'), {})
+check("negative_hits: blog -> hard",
+      score.negative_hits('My Blog', _FP_RULES)[0]['severity'], 'hard')
+check("negative_hits: news -> soft",
+      score.negative_hits('Latest News', _FP_RULES)[0]['severity'], 'soft')
+check("negative_hits: 中文博彩 -> gray",
+      score.negative_hits('澳门博彩', _FP_RULES)[0]['severity'], 'gray')
+check("negative_hits: 正常标题不命中",
+      score.negative_hits('Tautulli Dashboard', _FP_RULES), [])
+
+_raw_neg = [{'ip': '1.2.3.4', 'port': '80', 'host': 'x.com',
+             'protocol': 'http', 'title': 'Tautulli Blog'}]
+_hx_neg = [{'input': 'x.com:80', 'status_code': 200,
+            'title': 'Tautulli Blog', 'tech': ['Tautulli']}]
+_ctx_neg = {'product': 'Tautulli', 'matched_fingerprint': 'app="Tautulli"',
+            'affected_ranges': []}
+_kept_neg, _ = score.evaluate_rows(
+    _raw_neg, _hx_neg, [], [], _ctx_neg, {}, {}, min_score=0, limit=10,
+    fingerprint_rules=_FP_RULES)
+check("negative: hard 词把 tier 封顶为 C",
+      _kept_neg[0]['confidence_tier'], 'C')
+check("negative: hard 词扣 15 分", _kept_neg[0]['score_penalty'], -15)
+
+check("tier: affected -> A",
+      score.classify_tier('affected', False), 'A')
+check("tier: 强证据 + unknown -> B",
+      score.classify_tier('unknown', True), 'B')
+check("tier: 弱证据 -> C",
+      score.classify_tier('unknown', False), 'C')
+
+check("server_product_hit: server 点名产品",
+      score.server_product_hit('Nginx', 'nginx/1.18.0', '', ''), True)
+check("server_product_hit: 无关 server 不命中",
+      score.server_product_hit('Tautulli', 'nginx/1.18.0', '', ''), False)
+check("server_product_hit: X-Powered-By 点名产品",
+      score.server_product_hit('ThinkPHP', '', '',
+                               'X-Powered-By: ThinkPHP/6.0'), True)
+
+_pv = score.probe_versions_for(
+    [{'input': 'x.com:80', 'version': '2.10.0', 'source': 'version_probe'}],
+    'Tautulli')
+check("probe_versions_for: 解析版本", _pv[0]['version'], '2.10.0')
+check("probe_versions_for: 来源为 version_probe", _pv[0]['source'], 'version_probe')
+
+_ev = score.build_evidence(
+    {'title': 'T', 'server': 'S', 'org': 'O', 'country': 'US'},
+    {'status_code': 200, 'title': 'T', 'webserver': 'S',
+     'tech': ['Tautulli:2.10.0'], 'url': 'http://x:80'},
+    _pv, 'affected', True, False, True, ['Cloudflare'])
+check("evidence: 含 fofa/httpx/version/reachability",
+      sorted(_ev.keys()), ['fofa', 'httpx', 'reachability', 'version'])
+check("evidence: 不含原始 body/header",
+      'body' in _ev['httpx'] or 'header' in _ev['httpx'], False)
+check("evidence: reachability tested=True", _ev['reachability']['tested'], True)
+
+_vc = score.build_verify_commands(
+    'https://x:443', '/api/upload', 'Tautulli',
+    [{'start': '2.0', 'start_inclusive': True, 'end': '2.17.0',
+      'end_inclusive': False}])
+check("verify_commands: 生成路径与版本两条",
+      [c['label'] for c in _vc], ['建议验证路径', '版本判定'])
+check("verify_commands: 路径拼接正确",
+      _vc[0]['url'], 'https://x:443/api/upload')
+
+# 分层选择：同分下按国家轮转 + 可复现
+_fake = []
+for i, c in enumerate(['CN'] * 30 + ['US'] * 10 + ['DE'] * 5):
+    _fake.append({'ip': f'10.0.0.{i}', 'port': 80, 'url': f'http://10.0.0.{i}',
+                  'match_score': 50, 'confidence_tier': 'B',
+                  'verification_cost': None, 'country': c})
+_pick1, _, _tr, _reason = score.select_targets(_fake, 40, 20, 'stratified')
+_pick2, _, _, _ = score.select_targets(list(reversed(_fake)), 40, 20, 'stratified')
+check("select_targets: stratified 截断标记", _tr, True)
+check("select_targets: 结果可复现",
+      sorted((x['ip'] for x in _pick1)), sorted((x['ip'] for x in _pick2)))
+check("select_targets: 每个国家都被抽到",
+      len({x['country'] for x in _pick1}), 3)
+
+# ======================================================================
+# 14. 主动版本探测与可验证性闸门（纯离线）
+# ======================================================================
+print()
+print("=" * 72)
+print("14. version_probe / gate（纯离线）")
+print("=" * 72)
+
+_TABLE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           'version_probes.json')
+_table = version_probe.load_json(_TABLE_PATH, {}) or {}
+
+_rule = next(r for r in _table['rules'] if r['id'] == 'tautulli-get-version')
+_v, _ = version_probe.extract_version(
+    _rule, 200, {}, '{"response":{"data":{"version":"2.10.0"}}}', 'Tautulli')
+check("version_probe: JSON 路径提取", _v, '2.10.0')
+
+_rule = next(r for r in _table['rules'] if r['id'] == 'generic-server-header')
+_v, _ = version_probe.extract_version(
+    _rule, 200, {'Server': 'nginx/1.18.0'}, '', 'Nginx')
+check("version_probe: Server 头提取", _v, '1.18.0')
+_v, _ = version_probe.extract_version(
+    _rule, 200, {'Server': 'nginx/1.18.0'}, '', 'Tautulli')
+check("version_probe: 产品不匹配不采信", _v, None)
+
+_rule = next(r for r in _table['rules'] if r['id'] == 'wordpress-generator')
+_v, _ = version_probe.extract_version(
+    _rule, 200, {},
+    '<meta name="generator" content="WordPress 6.4.2">', 'WordPress')
+check("version_probe: generator meta 提取", _v, '6.4.2')
+
+check("version_probe: Tautulli 命中专用规则",
+      any(r['id'] == 'tautulli-get-version'
+          for r in version_probe.matching_rules('Tautulli', _table)), True)
+
+_g = gate.assess({'product': 'Tautulli', 'affected_ranges': []},
+                 table=_table)
+check("gate: 有专用版本端点的产品 -> candidates", _g['decision'], 'candidates')
+check("gate: candidates 启用 version_probe",
+      _g['probe_plan']['version_probe']['enabled'], True)
+
+_g = gate.assess({'product': 'SomeUnknownProduct', 'affected_ranges': []},
+                 table=_table)
+check("gate: 版本不可观测 -> census", _g['decision'], 'census')
+check("gate: census 关闭 waf", _g['probe_plan']['waf']['enabled'], False)
+
+_g = gate.assess({'product': '', 'affected_ranges': []}, table=_table)
+check("gate: 无产品 -> blocked", _g['decision'], 'blocked')
+
+_g = gate.assess({'product': 'Tautulli', 'affected_ranges': [],
+                  'version_observable': True}, cohort_size=5000, table=_table)
+check("gate: 大候选池 -> sampled", _g['decision'], 'sampled')
+
+# ======================================================================
+# 15. run_state / waf_batch / probe_inputs sampling（纯离线）
+# ======================================================================
+print()
+print("=" * 72)
+print("15. run_state / waf_batch / sampling")
+print("=" * 72)
+
+import shutil  # noqa: E402
+
+_td6 = tempfile.mkdtemp()
+try:
+    _man = os.path.join(_td6, 'run.json')
+    _art = os.path.join(_td6, 'nvd.json')
+    with open(_art, 'w', encoding='utf-8') as f:
+        f.write('{}')
+    check("run_state: init",
+          run_state.main(['init', '--manifest', _man, '--cve', 'CVE-X',
+                          '--query', 'q']), 0)
+    check("run_state: mark",
+          run_state.main(['mark', '--manifest', _man, '--stage', 'nvd',
+                          '--status', 'done', '--artifact', _art]), 0)
+    check("run_state: validate 可复用",
+          run_state.main(['validate', '--manifest', _man, '--stage', 'nvd',
+                          '--artifact', _art]), 0)
+    with open(_art, 'w', encoding='utf-8') as f:
+        f.write('{"changed":true}')
+    check("run_state: hash 变化 -> 需重跑",
+          run_state.main(['validate', '--manifest', _man, '--stage', 'nvd',
+                          '--artifact', _art]), 1)
+    check("run_state: 未标记阶段 -> 需重跑",
+          run_state.main(['validate', '--manifest', _man, '--stage', 'waf',
+                          '--artifact', _art]), 1)
+finally:
+    shutil.rmtree(_td6, ignore_errors=True)
+
+check("waf_batch: 分批形状",
+      [len(b) for b in waf_batch.plan_batches(list(range(70)), 32)],
+      [32, 32, 6])
+check("waf_batch: 空输入", waf_batch.plan_batches([], 32), [])
+
+_sample_rows = [
+    {'host': f'h{i}.com', 'port': '80', 'ip': f'1.1.1.{i}', 'country': c}
+    for i, c in enumerate(['CN'] * 30 + ['US'] * 10 + ['DE'] * 5)]
+_sampled = probe_inputs._sample_rows(_sample_rows, 20, 'country')
+check("probe_inputs sampling: 数量", len(_sampled), 20)
+check("probe_inputs sampling: 国家覆盖",
+      len({r['country'] for r in _sampled}), 3)
+
+# fofa_cache：miss -> put -> hit
+_td7 = tempfile.mkdtemp()
+try:
+    _cd = os.path.join(_td7, 'cache')
+    _src = os.path.join(_td7, 'src.json')
+    _out = os.path.join(_td7, 'out.json')
+    with open(_src, 'w', encoding='utf-8') as f:
+        f.write('{"results":[]}')
+    _common = ['--query', 'q', '--page', '1', '--size', '2000',
+               '--fields', 'ip', '--cache-dir', _cd]
+    check("fofa_cache: 未命中 -> 10",
+          fofa_cache.main(['get'] + _common + ['--out', _out]), 10)
+    check("fofa_cache: put -> 0",
+          fofa_cache.main(['put'] + _common + ['--file', _src]), 0)
+    check("fofa_cache: 命中 -> 0",
+          fofa_cache.main(['get'] + _common + ['--out', _out]), 0)
+    check("fofa_cache: 命中文件存在", os.path.exists(_out), True)
+finally:
+    shutil.rmtree(_td7, ignore_errors=True)
+
+# census：资产普查产物
+_td8 = tempfile.mkdtemp()
+try:
+    _cr = os.path.join(_td8, 'raw.json')
+    _cc = os.path.join(_td8, 'ctx.json')
+    _cs = os.path.join(_td8, 'stats.json')
+    _co = os.path.join(_td8, 'census.json')
+    with open(_cr, 'w', encoding='utf-8') as f:
+        json.dump([
+            {'ip': '1.1.1.1', 'port': '80', 'host': 'a.com',
+             'title': 'T', 'country': 'US', 'org': 'O'},
+            {'ip': '2.2.2.2', 'port': '443', 'host': 'b.com',
+             'title': 'T', 'country': 'CN', 'org': 'O'},
+        ], f)
+    with open(_cc, 'w', encoding='utf-8') as f:
+        json.dump({'cve_id': 'CVE-X', 'product': 'P', 'fofa_query': 'q'}, f)
+    with open(_cs, 'w', encoding='utf-8') as f:
+        json.dump({'size': 100}, f)
+    check("census: 退出码 0",
+          census.main(['--raw', _cr, '--context', _cc,
+                       '--stats', _cs, '--output', _co]), 0)
+    _cdoc = json.load(open(_co, encoding='utf-8'))
+    check("census: exported", _cdoc['exported'], 2)
+    check("census: coverage_ratio", _cdoc['coverage_ratio'], 0.02)
+    check("census: country", _cdoc['country'], {'US': 1, 'CN': 1})
+    check("census: 明确非漏洞清单",
+          '不是漏洞清单' in _cdoc['note'], True)
+finally:
+    shutil.rmtree(_td8, ignore_errors=True)
 
 print()
 print("=" * 72)

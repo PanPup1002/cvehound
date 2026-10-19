@@ -63,11 +63,26 @@ wafw00f --version
 
 ### 4. 注册 MCP Server
 
-claude mcp add fofa-mcp -- npx fofa-mcp
-claude mcp add nvd -- npx @cyanheads/nist-nvd-mcp-server
+**必须固定版本号**（`@x.y.z`），不要裸写包名——`npx` 默认拉最新，
+上游改参数名会让 agent 静默失效（实测：`nvd_get_cve` 的参数从 `cveId`
+变成了 `cveIds`，裸装最新版就报 `Unrecognized key: "cveId"`）。
+
+claude mcp add fofa-mcp -- npx fofa-mcp@0.6.2
+claude mcp add nvd -- npx @cyanheads/nist-nvd-mcp-server@0.3.1
 claude mcp list
 
-注意：MCP 只在 Claude Code 启动时加载，注册完必须彻底重启 Claude Code。
+`claude mcp list` 里两个都要显示 `✔ Connected`。
+升级时**同时**改上面两行的版本号，并按第 2 节的方式复测一次流水线。
+
+注意：
+- MCP 只在 Claude Code 启动时加载，注册完必须彻底重启 Claude Code。
+- 首次用固定版本时 `npx` 要现下载，冷启动可能超过 Claude Code 的 30s
+  连接超时、显示 `✘ Failed to connect`。这不是配置错——先手动
+  `npx -y <包>@<版本> --help` 热一次缓存，再 `claude mcp list` 复查即可。
+- `claude mcp add` 默认是 **local 作用域**，绑定项目**绝对路径**存在
+  `~/.claude.json` 的 `projects["<路径>"].mcpServers` 下。**移动或改名项目
+  目录后这两个 server 会失效**（表现为新目录里 `claude mcp list` 看不到它们），
+  需在新目录重跑本节命令。要避免这个问题可改用 `.mcp.json` 项目级配置。
 
 ### 5. 重启并验证
 
@@ -131,6 +146,39 @@ cdncheck -version
 **升级 Go 不要用 winget**（会装回 `C:\Program Files\Go` 并重建旧 PATH 条目），
 改用官方 zip 解压覆盖 `D:\Environment\GO`。
 
+## v2 流程与新增工具
+
+| 工具 | 用途 | 关键默认值 |
+|---|---|---|
+| `tools/gate.py` | 可验证性闸门 | 版本不可观测 → census |
+| `tools/version_probe.py` | 主动版本探测 | 只读 GET；50 目标；每目标 2 条规则 |
+| `tools/prefilter.py` | 评分预排名 | top-100 供 WAF/CDN |
+| `tools/waf_batch.py` | wafw00f 分批 | 32 条/批；900s/批 |
+| `tools/census.py` | census 资产普查 | 未探活、未验证 |
+| `tools/fofa_cache.py` | FOFA 导出缓存 | key=query+page+size+fields |
+| `tools/run_state.py` | 运行清单/断点续跑 | 阶段产物 sha256 |
+
+`score.py` 新增参数：`--version-probe`、`--selection stratified|top`、
+`--skip-reachability`。兼容性：JSON 仍是数组、20 个旧字段保留；
+TXT 不变；CSV 前 8 列不变，末尾追加新列。
+
+语义变更：
+- **缺失或未测 WAF/CDN → `reachability=not_tested`、成本 null**，
+  不再静默当成 `direct`。需要旧行为时显式传 `--skip-reachability` 也不会伪造 direct。
+- **`title=` 查询的标题命中不再计分**；纯标题命中会被 40 分门槛挡掉。
+- 负向词表 `tools/fingerprint_rules.json`：hard 词命中标题会把 tier 封顶为 C。
+- 输出截断默认分层抽样；覆盖率写入 `*_coverage.json`。
+- **census 模式**：版本不可观测时只做 FOFA 统计/导出，产出 `*_census.json/.csv`，
+  不跑探活与评分；报告明确写「0 条可验证候选」。
+- 默认大多数 CVE 会走 census。要强制完整流程：在 `tools/version_probes.json`
+  增加该产品的版本端点规则，或在 context.json 设 `"run_mode": "candidates"`。
+
+主动版本探测的安全边界（硬编码）：只发 GET、无认证、无 payload；
+遵守 `--scope`；`--max-targets`/`--max-requests` 限量；可用 `--dry-run` 先看计划。
+
+FOFA 账户无 `body` 字段导出权限（`[820001]`）：查询条件可继续用 `body=`，
+但导出 `fields` 必须移除 `body`。本方案以 version_probe 和独立指纹降低依赖。
+
 ## 项目结构
 
 输入: CVE ID
@@ -139,12 +187,16 @@ cdncheck -version
   ↓
 [Subagent: cve-recon]
   ├─ NVD 查 CVE → context.json
+  ├─ gate.py 可验证性闸门
+  │    ├─ census：只做 FOFA 统计/导出 → census.json/.csv
+  │    └─ candidates：继续
   ├─ 查 app_rules.json → 确定 FOFA 规则名
-  ├─ fofa_stats 预检 → fofa_export 导出 raw.json
-  ├─ httpx / cdncheck / wafw00f 探活
-  └─ score.py 评分 → targets.json / .txt / .csv
+  ├─ fofa_stats 预检 → fofa_export 导出 raw.json（含 country）
+  ├─ httpx 探活 → version_probe 主动版本探测
+  ├─ prefilter top-N → （按需）cdncheck / waf_batch
+  └─ score.py 评分 → targets.json / .txt / .csv / coverage.json
   ↓
-输出: 目标清单 + top 10 表格
+输出: 目标清单（tier A/B/C）+ top 10 + 覆盖率
 
 ## 常用命令
 
@@ -170,14 +222,25 @@ httpx 卡死无输出（最常见）：
 - 解法：命令末尾加 < /dev/null。参考 .claude/agents/cve-recon.md Step 5b。
 - httpx 还会在启动时联网检查更新，加 -duc 关闭。
 
-cdncheck 无结果 / 极慢：
+cdncheck 卡死不动（最常见，且最隐蔽）：
+- **真因：cdncheck 会顺带读 stdin 当输入源，本环境 stdin 永不 EOF → 静默挂死。**
+  与上面 httpx 那条同源。表现是进程不报错、不退出、输出文件长期为空，
+  极易被误判成"目标太多跑得慢"而干等。
+- **解法：命令末尾加 `< /dev/null`。** 实测同一份 212 主机的输入：
+  不加 → 21+ 分钟只出 2 条、最后只能手动终止；加了 → **7 秒正常退出**。
+  cve-recon.md Step 5c 已带该参数。
+- 2026-10 复测（无 EDR）：33 目标 ~60s 正常退出。**但 212 目标规模下
+  「30 目标挂死」复现了**——根因就是上面这条 stdin 问题，与目标数量、
+  解析器、`-resp`/`-cdn`/`-waf` 哪个 flag 都无关（逐个 flag 隔离实测，
+  连不加 flag 都挂）。不要再去调 flag 了，先加 `< /dev/null`。
+
+cdncheck 无结果 / 解析失败：
 - **输入必须裸主机名**：host:port 输入会静默查不到任何结果。
   用 probe_inputs.py 产出的 _probe_hosts.txt。
 - **默认解析器境内不可达**（1.0.0.1/1.1.1.1）：现象是大量 could not resolve
   且极慢。公共 UDP:53（223.5.5.5 等）实测时通时断；用 DoH：
   -r 'doh:https://dns.alidns.com/dns-query'
-- 2026-10 复测（无绿盟 EDR，33 目标混公网/拒连）：~60s 正常退出，
-  此前「30 目标挂死」未复现。score.py 仍对空 cdn 文件容错，不阻塞主流程。
+- score.py 对空 cdn 文件容错，不阻塞主流程。
 
 FOFA 返回 [45012]：
 请求速度过快。Agent 内部已 sleep 60，如有并行调用检查 Subagent 逻辑。

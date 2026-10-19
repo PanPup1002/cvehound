@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "tautulli-get-version",
+      "products": ["Tautulli"],
+      "path": "/api/v2?cmd=get_version",
+      "type": "json",
+      "json_path": "response.data.version",
+      "confidence": 0.95,
+      "expected": "JSON 含 response.data.version"
+    },
+    {
+      "id": "grafana-api-health",
+      "products": ["Grafana"],
+      "path": "/api/health",
+      "type": "json",
+      "json_path": "version",
+      "confidence": 0.95,
+      "expected": "JSON 含 version 字段"
+    },
+    {
+      "id": "loki-buildinfo",
+      "products": ["Grafana Loki", "Loki"],
+      "path": "/loki/api/v1/status/buildinfo",
+      "type": "json",
+      "json_path": "version",
+      "confidence": 0.95,
+      "expected": "JSON 含 version 字段"
+    },
+    {
+      "id": "wordpress-generator",
+      "products": ["WordPress"],
+      "path": "/",
+      "type": "meta_generator",
+      "regex": "WordPress\\s+([0-9]+(?:\\.[0-9]+){1,3})",
+      "confidence": 0.85,
+      "expected": "HTML <meta name=\"generator\" content=\"WordPress x.y.z\">"
+    },
+    {
+      "id": "generic-server-header",
+      "products": ["*"],
+      "path": "/",
+      "type": "header",
+      "header": "server",
+      "regex": "^([A-Za-z][A-Za-z0-9 ._-]*?)/([0-9]+(?:\\.[0-9]+){1,3})",
+      "product_group": 1,
+      "version_group": 2,
+      "confidence": 0.80,
+      "expected": "Server 头形如 Product/x.y.z，且产品名需与目标产品一致"
+    },
+    {
+      "id": "generic-meta-generator",
+      "products": ["*"],
+      "path": "/",
+      "type": "meta_generator",
+      "regex": "name=[\"']generator[\"'][^>]*content=[\"']([^\"']+?)[\"']",
+      "confidence": 0.75,
+      "expected": "HTML generator meta 中出现版本号"
+    }
+  ]
+}

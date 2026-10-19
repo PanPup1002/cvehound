@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "generic_negative": {
+    "hard": [
+      "blog", "documentation", "docs", "tutorial", "wiki", "forum",
+      "github repository", "source code", "release notes", "changelog"
+    ],
+    "soft": [
+      "download", "pricing", "careers", "jobs", "news", "article",
+      "review", "demo", "marketing", "agency", "theme", "template",
+      "plugin", "integration", "official website", "experts",
+      "consulting", "reseller", "partner"
+    ],
+    "gray": [
+      "casino", "betting", "gambling", "poker", "lottery", "adult",
+      "porn", "彩票", "博彩", "赌场", "棋牌", "娱乐城"
+    ]
+  },
+  "notes": [
+    "hard: 出现在标题即把 tier 封顶为 C，并扣分",
+    "soft: 只扣分，不封顶",
+    "gray: 只扣分；是否硬剔除由 org 硬排除词表负责",
+    "匹配：ASCII 用词边界，中文用子串"
+  ]
+}

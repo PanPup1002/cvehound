@@ -23,6 +23,7 @@
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -77,12 +78,45 @@ def build_probe_lines(rows):
             list(dict.fromkeys(hosts)))
 
 
+def _sample_rows(rows, limit, policy):
+    """确定性抽样。country 策略按国家分组轮转，避免抽样只落在某一个国家。"""
+    def key(row):
+        host, port, _ = pick_probe(row)
+        raw = f"{host or row.get('ip')}:{port}"
+        return hashlib.sha256(raw.encode('utf-8')).hexdigest()
+
+    if policy != 'country':
+        return sorted(rows, key=key)[:limit]
+
+    groups = {}
+    for row in rows:
+        country = str(row.get('country') or '??').strip() or '??'
+        groups.setdefault(country, []).append(row)
+    for g in groups.values():
+        g.sort(key=key)
+    keys = sorted(groups)
+    out = []
+    while len(out) < limit:
+        progressed = False
+        for k in keys:
+            if groups[k] and len(out) < limit:
+                out.append(groups[k].pop(0))
+                progressed = True
+        if not progressed:
+            break
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description='从 raw.json 生成 httpx/cdncheck/wafw00f 探活输入（域名优先）')
     ap.add_argument('--raw', required=True, help='FOFA 导出结果')
     ap.add_argument('--prefix', required=True, help='输出前缀，如 data/CVE-2021-44228')
     ap.add_argument('--scope', default=None, help='可选授权范围 JSON；提供时只输出范围内资产')
+    ap.add_argument('--max-targets', type=int, default=0,
+                    help='>0 时按 --sample-policy 抽样到该数量')
+    ap.add_argument('--sample-policy', choices=('none', 'country'),
+                    default='none', help='抽样策略；country = 按国家轮转')
     args = ap.parse_args(argv)
 
     try:
@@ -94,7 +128,7 @@ def main(argv=None):
     except json.JSONDecodeError as e:
         print(f'[错误] raw 文件 JSON 损坏: {e}', file=sys.stderr)
         return 2
-    rows = data.get('results') if isinstance(data, dict) else data
+    rows = data.get('results') or data.get('data') if isinstance(data, dict) else data
     if not isinstance(rows, list):
         print('[错误] raw 结构无法识别（既不是数组也不是 {"results":[...]}）', file=sys.stderr)
         return 2
@@ -107,6 +141,11 @@ def main(argv=None):
             print(f'[错误] {e}', file=sys.stderr)
             return 3
         print(f'scope_filtered={dropped}')
+
+    population = len(rows)
+    if args.max_targets and args.max_targets > 0 and population > args.max_targets:
+        rows = _sample_rows(rows, args.max_targets, args.sample_policy)
+        print(f'sampled={len(rows)}/{population} policy={args.sample_policy}')
 
     targets, urls, hosts = build_probe_lines(rows)
     for path, lines in ((f'{args.prefix}_probe_targets.txt', targets),
