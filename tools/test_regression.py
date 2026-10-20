@@ -540,6 +540,31 @@ check("title 查询的 FOFA 标题命中不算独立",
       score.fofa_title_is_independent('title="Kofax"'), False)
 check("app 查询的 FOFA 标题命中算独立",
       score.fofa_title_is_independent('app="VeraSMART"'), True)
+check("fingerprint_needles: 提取引号内值",
+      score.fingerprint_needles('cert="Ahsay"'), ['cert="Ahsay"', 'Ahsay'])
+check("fofa_title_hit: cert 指纹值参与标题匹配",
+      score.fofa_title_hit('AhsayCBS', 'cert="Ahsay"',
+                           'Ahsay Online Backup'), True)
+check("cohort_evidence_kind: cert -> cert",
+      score.cohort_evidence_kind('cert="Ahsay"'), 'cert')
+check("cohort_evidence_kind: 插件资源路径 -> body-path",
+      score.cohort_evidence_kind(
+          'body="/wp-content/plugins/divi-plus/"'), 'body-path')
+check("cohort_evidence_kind: 普通 body 关键词不计 cohort",
+      score.cohort_evidence_kind('body="flowsint"'), '')
+check("tech匹配: Elementor 不归到 Unlimited Elements For Elementor",
+      score._tech_name_matches(
+          'Unlimited Elements For Elementor', 'Elementor'), False)
+check("tech匹配: log4j 命中 log4j2",
+      score._tech_name_matches('Apache Log4j2', 'Log4j'), True)
+check("tech匹配: Apache 命中 Apache HTTP Server",
+      score._tech_name_matches('Apache HTTP Server', 'Apache'), True)
+check("tech匹配: PHP 不命中 ThinkPHP",
+      score._tech_name_matches('ThinkPHP', 'PHP'), False)
+check("tech匹配: Divi 主题不归到 Divi Plus 插件",
+      score._tech_name_matches('Divi Plus', 'Divi'), False)
+check("tech匹配: 产品本身就是 Divi 主题时允许",
+      score._tech_name_matches('Divi', 'Divi'), True)
 
 _FP_RULES = score.load_json(
     os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -565,6 +590,21 @@ _kept_neg, _ = score.evaluate_rows(
 check("negative: hard 词把 tier 封顶为 C",
       _kept_neg[0]['confidence_tier'], 'C')
 check("negative: hard 词扣 15 分", _kept_neg[0]['score_penalty'], -15)
+
+# app/cert 指纹引擎 cohort 证据
+_raw_cert = [{'ip': '1.2.3.4', 'port': 443, 'host': 'x.com',
+              'protocol': 'https', 'title': 'Ahsay Online Backup'}]
+_hx_cert = [{'input': 'x.com:443', 'status_code': 200,
+             'title': 'Ahsay Online Backup', 'tech': []}]
+_ctx_cert = {'product': 'AhsayCBS', 'matched_fingerprint': 'cert="Ahsay"',
+             'affected_ranges': []}
+_kept_cert, _ = score.evaluate_rows(
+    _raw_cert, _hx_cert, [], [], _ctx_cert, {}, {}, min_score=0, limit=10,
+    fingerprint_rules=_FP_RULES)
+check("cohort: cert= 查询给 30 分 + 标题 10 分",
+      _kept_cert[0]['match_score'], 40)
+check("cohort: cert= 查询 tier B",
+      _kept_cert[0]['confidence_tier'], 'B')
 
 check("tier: affected -> A",
       score.classify_tier('affected', False), 'A')
@@ -651,6 +691,12 @@ _v, _ = version_probe.extract_version(
     _rule, 200, {},
     '<meta name="generator" content="WordPress 6.4.2">', 'WordPress')
 check("version_probe: generator meta 提取", _v, '6.4.2')
+
+_v, _ = version_probe.extract_version(
+    {'type': 'readme_stable_tag',
+     'regex': r'Stable tag:\s*([0-9]+(?:\.[0-9]+){1,3})'},
+    200, {}, '=== Plugin ===\nStable tag: 2.4.0\nTested up to: 6.5\n', 'Divi Plus')
+check("version_probe: 插件 readme Stable tag 提取", _v, '2.4.0')
 
 check("version_probe: Tautulli 命中专用规则",
       any(r['id'] == 'tautulli-get-version'

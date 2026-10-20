@@ -1,5 +1,5 @@
 # cvehound
-CVE目标获取流水线（第一阶段）
+CVE目标获取
 - 输入：CVE ID
 - 输出：经过硬排除和质量评分的有效目标列表
 - 依赖：fofa-mcp, nvd-mcp, httpx, cdncheck, wafw00f
@@ -105,6 +105,7 @@ CVE目标获取流水线（第一阶段）
 
 | 分值 | 证据 |
 |---:|---|
+| +30 | FOFA `app=` / `cert=` / `header=` 指纹引擎命中（强 cohort） |
 | +40 | httpx `tech[]` 命中产品（强独立） |
 | +30 | `server` / `X-Powered-By` 命中产品（强独立） |
 | +25 | 有可靠版本号（tech/server/version_probe） |

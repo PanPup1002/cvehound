@@ -29,6 +29,7 @@ CVE 目标质量评分脚本
   {CVE}_coverage.json  覆盖率、截断原因、tier/国家分布
 
 评分模型（v2，满分 clamp 100）
+  +30  FOFA app= / cert= / header= 指纹引擎命中（强 cohort）
   +40  httpx tech[] 命中 product（强独立）
   +30  server / X-Powered-By 命中 product（强独立）
   +25  有可靠版本号（version_probe > httpx_tech > server > fofa）
@@ -95,12 +96,19 @@ VERIFICATION_COST = {'direct': 10, 'waf': 30, 'cdn': 40, 'cdn+waf': 60}
 # 证据权重。满分 clamp 到 100（此前实际可到 130，文档却写 0-100）。
 # 关键：标题只是弱证据；tech/server 才是独立于 FOFA 查询的产品证据。
 EVIDENCE_WEIGHTS = {
-    'tech': 40,       # httpx tech[] 命中产品
-    'server': 30,     # server / X-Powered-By 命中产品（强独立）
-    'version': 25,    # 任一可靠版本号
-    'affected': 25,   # 版本落在影响区间
-    'title': 10,      # 标题命中产品（live title 优先；FOFA title 仅非 title 查询时计）
+    'cohort': 30,       # FOFA app=/cert=/header= 指纹引擎命中
+    'cohort_path': 40,  # body= 命中具体资源路径（如 /wp-content/plugins/<slug>/）
+    'tech': 40,         # httpx tech[] 命中产品
+    'server': 30,       # server / X-Powered-By 命中产品（强独立）
+    'version': 25,      # 任一可靠版本号
+    'affected': 25,     # 版本落在影响区间
+    'title': 10,        # 标题命中产品
 }
+
+# app=/cert=/header= 由 FOFA 的指纹引擎匹配产品身份，属于强 cohort 证据；
+# title=/body= 的普通文本命中与查询自证无法区分，不作为 cohort 证据。
+# 例外：body= 命中具体资源路径（含 "/"）是结构性安装证据，单独计 cohort_path。
+COHORT_EVIDENCE_KINDS = ('app', 'cert', 'header')
 MAX_MATCH_SCORE = 100
 
 # 负向词：hard 命中标题即把 tier 封顶为 C；soft/gray 只扣分。
@@ -235,6 +243,18 @@ def tech_hit(product, tech):
     return False
 
 
+def fingerprint_needles(fingerprint):
+    """从指纹中提取可参与标题匹配的值。
+    `cert="Ahsay"` -> ['cert="Ahsay"', 'Ahsay']；纯字符串原样返回。"""
+    s = str(fingerprint or '').strip()
+    needles = [s] if s else []
+    for m in re.finditer(r'"([^"]+)"|\'([^\']+)\'', s):
+        v = (m.group(1) or m.group(2) or '').strip()
+        if v and v not in needles:
+            needles.append(v)
+    return needles
+
+
 def fofa_title_hit(product, fingerprint, title):
     """FOFA 标题是否命中产品（或匹配指纹）。指纹库盲区通道：wappalyzer 没有
     该产品指纹时（框架类 CVE），FOFA 抓到的页面标题若显式点名产品
@@ -244,17 +264,32 @@ def fofa_title_hit(product, fingerprint, title):
     t = str(title or '').lower()
     if not t:
         return False
-    for needle in (product, fingerprint):
+    for needle in [product] + fingerprint_needles(fingerprint):
         n = str(needle or '').strip().lower()
         if n and n in t:
             return True
     return False
 
 
+# 平台/依赖词：单独出现时不能被当成某个多词产品的身份。
+# 典型误判：产品 "Unlimited Elements For Elementor" 被 tech "Elementor" 命中，
+# 把 Elementor 的版本记到插件头上（实测导致 1078 条错误 unaffected）。
+PLATFORM_TECH_WORDS = {
+    'elementor', 'wordpress', 'woocommerce', 'joomla', 'drupal', 'shopify',
+    'bootstrap', 'jquery', 'react', 'vue', 'angular', 'laravel', 'django',
+    'rails', 'spring', 'magento', 'prestashop', 'divi', 'astra', 'oceanwp',
+}
+
+
 def _tech_name_matches(product, name):
-    """tech 条目名与产品名是否指同一产品。按词首匹配，双向。
-        "log4j" 命中 "log4j2"（Apache Log4j2 的产品名里带 2）
-        但 "php" 命中不了 "thinkphp"（避免把 ThinkPHP 的版本记到 PHP 头上）
+    """tech 条目名与产品名是否指同一产品。
+    规则：
+      1. 归一化后完全相同 -> 命中；
+      2. 产品名含 for/by/with 时，只取分隔词之前的主体
+         （"Unlimited Elements For Elementor" -> "unlimited elements"）；
+      3. 单 token 的平台词（Elementor/WordPress 等）单独命中不算，
+         除非它本身就是产品主体的一部分；
+      4. 其余按词首匹配（"log4j" 命中 "log4j2"，"php" 命中不了 "thinkphp"）。
     """
     prod = _norm_prod(product).split()
     nm = _norm_prod(name).split()
@@ -262,6 +297,14 @@ def _tech_name_matches(product, name):
         return False
     if prod == nm:
         return True
+    for sep in ('for', 'by', 'with'):
+        if sep in prod:
+            prod = prod[:prod.index(sep)]
+            break
+    if not prod:
+        return False
+    if len(nm) == 1 and nm[0] in PLATFORM_TECH_WORDS:
+        return False
     return any(a.startswith(b) or b.startswith(a) for a in prod for b in nm)
 
 
@@ -392,6 +435,20 @@ def negative_hits(text, rules):
             elif term_l in t:
                 out.append({'term': term, 'severity': severity})
     return out
+
+
+def cohort_evidence_kind(fingerprint):
+    """返回 cohort 证据类型：app/cert/header/body-path，无则空串。
+    body= 只有命中具体资源路径（含 "/"）才算结构性证据；
+    普通文本关键词（如 body="flowsint"）仍视为查询自证。"""
+    kind = fingerprint_kind(fingerprint)
+    if kind in COHORT_EVIDENCE_KINDS:
+        return kind
+    if kind == 'body':
+        for needle in fingerprint_needles(fingerprint):
+            if '/' in needle and len(needle) > 8:
+                return 'body-path'
+    return ''
 
 
 def classify_tier(version_status, has_strong_evidence):
@@ -697,6 +754,12 @@ def evaluate_rows(raw, httpx_items, cdn_items, waf_rows, context, rules,
         match_score = 0
         reasons = []
         strong_evidence = False
+        cohort_kind = cohort_evidence_kind(fingerprint)
+        if cohort_kind:
+            weight_key = 'cohort_path' if cohort_kind == 'body-path' else 'cohort'
+            match_score += EVIDENCE_WEIGHTS[weight_key]
+            strong_evidence = True
+            reasons.append(f'FOFA {cohort_kind} 证据命中')
         if tech_ok:
             match_score += EVIDENCE_WEIGHTS['tech']
             strong_evidence = True

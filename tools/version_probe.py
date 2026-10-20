@@ -140,6 +140,19 @@ def extract_version(rule, status, headers, body, product):
             return None, ''
         return m2.group(0), f'{header_name}: {value}'
 
+    if rule.get('type') == 'readme_stable_tag':
+        m = re.search(
+            rule.get('regex')
+            or r'Stable tag:\s*([0-9]+(?:\.[0-9]+){1,3})',
+            body, re.I)
+        if not m:
+            return None, ''
+        ver = m.group(1) if m.groups() else m.group(0)
+        m2 = _VER_RE.search(str(ver))
+        if not m2:
+            return None, ''
+        return m2.group(0), f'readme Stable tag: {m.group(0)[:120]}'
+
     if rule.get('type') == 'meta_generator':
         m = re.search(rule.get('regex') or '', body, re.I | re.S)
         if not m:
@@ -226,6 +239,21 @@ def main(argv=None):
     product = str(context.get('product') or '').strip()
     table = load_json(args.table, {}) or {}
     rules = matching_rules(product, table)
+    # context 显式指定的版本路径优先（如 WordPress 插件的 readme.txt）
+    extra = []
+    for p in (context.get('version_probe') or {}).get('paths') or []:
+        p = str(p or '').strip()
+        if not p:
+            continue
+        extra.append({
+            'id': 'context-path',
+            'products': ['*'],
+            'path': p,
+            'type': 'readme_stable_tag',
+            'regex': r'Stable tag:\s*([0-9]+(?:\.[0-9]+){1,3})',
+            'confidence': 0.90,
+        })
+    rules = extra + rules
     for r in rules:
         r['_product'] = product
 
