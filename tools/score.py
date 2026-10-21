@@ -449,7 +449,9 @@ def cohort_evidence_kind(fingerprint):
         return kind
     if kind == 'body':
         for needle in fingerprint_needles(fingerprint):
-            if '/' in needle and len(needle) > 8:
+            n = needle.strip()
+            if ('/' in n and len(n) > 8) or re.match(
+                    r'^(?:com|mod|plg)_[a-z0-9_]+$', n, re.I):
                 return 'body-path'
     return ''
 

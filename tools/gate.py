@@ -99,8 +99,9 @@ def assess(context, stats=None, cohort_size=None, table=None,
         version_observable = False
         reasons = ['context.run_mode=census 强制普查']
     elif run_mode == 'candidates':
-        version_observable = True
-        reasons = ['context.run_mode=candidates 强制执行完整流程']
+        # 只强制走完整流程，不伪造 version_observable。
+        # 版本不可观测时 ceiling 仍应为 B（affected 不可达）。
+        reasons.append('context.run_mode=candidates 强制执行完整流程')
 
     affected = version_compare.select_ranges(context)
     if not affected:

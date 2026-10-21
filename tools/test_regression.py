@@ -561,6 +561,8 @@ check("cohort_evidence_kind: title -> title",
 check("cohort_evidence_kind: 插件资源路径 -> body-path",
       score.cohort_evidence_kind(
           'body="/wp-content/plugins/divi-plus/"'), 'body-path')
+check("cohort_evidence_kind: Joomla 组件标识 -> body-path",
+      score.cohort_evidence_kind('body="com_youtubegallery"'), 'body-path')
 check("cohort_evidence_kind: 普通 body 关键词不计 cohort",
       score.cohort_evidence_kind('body="flowsint"'), '')
 check("tech匹配: Elementor 不归到 Unlimited Elements For Elementor",
@@ -756,6 +758,12 @@ _g = gate.assess({'product': 'SomeUnknownProduct', 'run_mode': 'census'},
 check("gate: 显式 census -> census", _g['decision'], 'census')
 check("gate: census 关闭 httpx",
       _g['probe_plan']['httpx']['enabled'], False)
+
+_g = gate.assess({'product': 'SomeUnknownProduct', 'run_mode': 'candidates'},
+                 table=_table)
+check("gate: 强制 candidates 不伪造可观测性",
+      _g['version_observable'], False)
+check("gate: 强制 candidates + 不可观测 -> ceiling B", _g['ceiling'], 'B')
 
 _g = gate.assess({'product': '', 'affected_ranges': []}, table=_table)
 check("gate: 无产品 -> blocked", _g['decision'], 'blocked')
