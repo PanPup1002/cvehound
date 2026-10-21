@@ -163,13 +163,16 @@ cdncheck -version
 TXT 不变；CSV 前 8 列不变，末尾追加新列。
 
 语义变更：
+- **默认执行探活与评分**（candidates）。`version_observable=false` 只把 ceiling
+  降到 B，不再跳过 httpx/评分——输出 tier B 候选池。
+- **census 仅在显式 `run_mode=census` 时启用**，只做 FOFA 统计/导出。
 - **缺失或未测 WAF/CDN → `reachability=not_tested`、成本 null**，
   不再静默当成 `direct`。需要旧行为时显式传 `--skip-reachability` 也不会伪造 direct。
 - **`title=` 查询的标题命中不再计分**；纯标题命中会被 40 分门槛挡掉。
 - 负向词表 `tools/fingerprint_rules.json`：hard 词命中标题会把 tier 封顶为 C。
 - 输出截断默认分层抽样；覆盖率写入 `*_coverage.json`。
-- **census 模式**：版本不可观测时只做 FOFA 统计/导出，产出 `*_census.json/.csv`，
-  不跑探活与评分；报告明确写「0 条可验证候选」。
+- **census 模式的产出**：`*_census.json/.csv`（只在显式 `run_mode=census` 时生成），
+  报告明确写「0 条可验证候选」。
 - 默认大多数 CVE 会走 census。要强制完整流程：在 `tools/version_probes.json`
   增加该产品的版本端点规则，或在 context.json 设 `"run_mode": "candidates"`。
 

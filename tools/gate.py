@@ -111,10 +111,10 @@ def assess(context, stats=None, cohort_size=None, table=None,
         total = stats.get('size')
     sampled = isinstance(total, int) and total > max_probe
 
-    if not version_observable:
+    if run_mode == 'census':
         decision = 'census'
         ceiling = 'C'
-        reasons.append('版本不可通过 HTTP 观测；只输出资产普查，不输出漏洞候选')
+        reasons.append('context.run_mode=census 显式要求普查；跳过探活与评分')
         probe_plan = {
             'httpx': {'enabled': False, 'max_targets': 0},
             'cdn': {'enabled': False, 'max_targets': 0},
@@ -122,10 +122,19 @@ def assess(context, stats=None, cohort_size=None, table=None,
             'version_probe': {'enabled': False, 'max_targets': 0},
         }
     else:
+        # 默认执行探活与评分。版本不可观测只影响天花板（affected 不可达），
+        # 不再因此跳过 httpx/评分——否则会丢失 tier B 的资产候选。
         decision = 'sampled' if sampled else 'candidates'
-        ceiling = 'A' if affected else 'B'
         if sampled:
             reasons.append(f'候选池 {total} 超过探活上限 {max_probe}，需要分层抽样')
+        if not version_observable:
+            ceiling = 'B'
+            reasons.append('版本不可通过 HTTP 观测：仍执行探活与评分，'
+                           '但 affected 不可达，最高 tier B')
+        elif not affected:
+            ceiling = 'B'
+        else:
+            ceiling = 'A'
         probe_plan = {
             'httpx': {'enabled': True, 'max_targets': max_probe},
             'cdn': {'enabled': False, 'max_targets': 0,

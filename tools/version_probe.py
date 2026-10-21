@@ -153,6 +153,30 @@ def extract_version(rule, status, headers, body, product):
             return None, ''
         return m2.group(0), f'readme Stable tag: {m.group(0)[:120]}'
 
+    if rule.get('type') == 'body_regex':
+        m = re.search(rule.get('regex') or '', body, re.I | re.S)
+        if not m:
+            return None, ''
+        ver = m.group(1) if m.groups() else m.group(0)
+        m2 = _VER_RE.search(str(ver))
+        if not m2:
+            return None, ''
+        return m2.group(0), f'body regex: {m.group(0)[:120]}'
+
+    if rule.get('type') == 'body_product_version':
+        product = str(product or '').strip()
+        if not product:
+            return None, ''
+        pat = re.escape(product) + r'[^\n<>]{0,40}?([0-9]+(?:\.[0-9]+){1,3})'
+        m = re.search(pat, body, re.I | re.S)
+        if not m:
+            return None, ''
+        ver = m.group(1) if m.groups() else m.group(0)
+        m2 = _VER_RE.search(str(ver))
+        if not m2:
+            return None, ''
+        return m2.group(0), f'产品名邻近版本: {m.group(0)[:120]}'
+
     if rule.get('type') == 'meta_generator':
         m = re.search(rule.get('regex') or '', body, re.I | re.S)
         if not m:

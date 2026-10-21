@@ -131,11 +131,14 @@ hard/soft/gray 扣分；**hard 词命中标题直接把 `confidence_tier` 封顶
 
 ### 闸门与探测成本
 
-- `tools/gate.py` 先判断版本能否通过 HTTP 观测；不能则只做资产普查（census），
-  不跑 httpx/cdncheck/wafw00f/评分。
-- **默认大多数 CVE 会走 census**（因为产品不在版本端点表里）。要跑完整流程：
-  1. 在 `tools/version_probes.json` 增加该产品的版本端点规则；或
-  2. 在 `context.json` 设 `"run_mode": "candidates"` 强制执行。
+- `tools/gate.py` 在 NVD 情报后判定流程强度：
+  - **默认 candidates**：执行 httpx 探活 + 版本探测 + 评分；
+  - `version_observable=false` 仍会探活与评分，只是 `ceiling=B`、
+    `affected` 不可达，输出 **tier B 候选池**；
+  - **census** 仅在显式 `run_mode=census` 时启用，只做 FOFA 统计/导出；
+  - `blocked` 仅在产品信息缺失时出现。
+- 产品不在版本端点表里时，`version_probe` 会尝试通用规则
+  （Server 头、generator meta、页面中产品名邻近的版本号）。
 - WAF/CDN 默认不探测；仅对 `tools/prefilter.py` 选出的 top-N（默认 100）执行。
 - 缺失/未测记 `reachability=not_tested`、成本 `null`，**绝不默认 direct**。
 - 输出截断默认分层抽样（`--selection stratified`），并写 `*_coverage.json`。

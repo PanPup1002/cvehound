@@ -38,6 +38,15 @@
       "expected": "HTML <meta name=\"generator\" content=\"WordPress x.y.z\">"
     },
     {
+      "id": "metinfo-footer-version",
+      "products": ["MetInfo"],
+      "path": "/",
+      "type": "body_regex",
+      "regex": "(?:Powered\\s+by\\s+MetInfo|MetInfo)[^\\n<>]{0,40}?([0-9]+(?:\\.[0-9]+){1,3})",
+      "confidence": 0.85,
+      "expected": "footer 的 Powered by MetInfo x.y.z"
+    },
+    {
       "id": "generic-server-header",
       "products": ["*"],
       "path": "/",
@@ -57,6 +66,14 @@
       "regex": "name=[\"']generator[\"'][^>]*content=[\"']([^\"']+?)[\"']",
       "confidence": 0.75,
       "expected": "HTML generator meta 中出现版本号"
+    },
+    {
+      "id": "generic-body-product-version",
+      "products": ["*"],
+      "path": "/",
+      "type": "body_product_version",
+      "confidence": 0.70,
+      "expected": "页面正文中产品名附近出现版本号（如 Powered by X 1.2.3）"
     }
   ]
 }

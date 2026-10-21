@@ -608,6 +608,10 @@ check("cohort: cert= 查询 tier B",
 
 check("tier: affected -> A",
       score.classify_tier('affected', False), 'A')
+check("tier: affected + 低可信版本 -> B",
+      score.classify_tier('affected', True, 0.7), 'B')
+check("tier: affected + 高可信版本 -> A",
+      score.classify_tier('affected', True, 0.9), 'A')
 check("tier: 强证据 + unknown -> B",
       score.classify_tier('unknown', True), 'B')
 check("tier: 弱证据 -> C",
@@ -626,6 +630,9 @@ _pv = score.probe_versions_for(
     'Tautulli')
 check("probe_versions_for: 解析版本", _pv[0]['version'], '2.10.0')
 check("probe_versions_for: 来源为 version_probe", _pv[0]['source'], 'version_probe')
+_pv_low = score.probe_versions_for(
+    [{'version': '1.2.3', 'confidence': 0.7}], 'X')
+check("probe_versions_for: 使用记录 confidence", _pv_low[0]['reliability'], 0.7)
 
 _ev = score.build_evidence(
     {'title': 'T', 'server': 'S', 'org': 'O', 'country': 'US'},
@@ -698,6 +705,21 @@ _v, _ = version_probe.extract_version(
     200, {}, '=== Plugin ===\nStable tag: 2.4.0\nTested up to: 6.5\n', 'Divi Plus')
 check("version_probe: 插件 readme Stable tag 提取", _v, '2.4.0')
 
+_v, _ = version_probe.extract_version(
+    {'type': 'body_regex',
+     'regex': r'Powered by MetInfo\s*([0-9]+(?:\.[0-9]+){1,3})'},
+    200, {}, '<footer>Powered by MetInfo 7.5.0</footer>', 'MetInfo')
+check("version_probe: body_regex 提取", _v, '7.5.0')
+
+_v, _ = version_probe.extract_version(
+    {'type': 'body_product_version'}, 200, {},
+    '<div>Powered by MetInfo 7.5.0</div>', 'MetInfo')
+check("version_probe: 产品名邻近版本提取", _v, '7.5.0')
+_v, _ = version_probe.extract_version(
+    {'type': 'body_product_version'}, 200, {},
+    '<div>Unrelated 9.9.9</div>', 'MetInfo')
+check("version_probe: 产品名不出现则不提取", _v, None)
+
 check("version_probe: Tautulli 命中专用规则",
       any(r['id'] == 'tautulli-get-version'
           for r in version_probe.matching_rules('Tautulli', _table)), True)
@@ -710,8 +732,19 @@ check("gate: candidates 启用 version_probe",
 
 _g = gate.assess({'product': 'SomeUnknownProduct', 'affected_ranges': []},
                  table=_table)
-check("gate: 版本不可观测 -> census", _g['decision'], 'census')
-check("gate: census 关闭 waf", _g['probe_plan']['waf']['enabled'], False)
+check("gate: 版本不可观测 -> 仍 candidates（继续探活）",
+      _g['decision'], 'candidates')
+check("gate: 版本不可观测 -> ceiling B", _g['ceiling'], 'B')
+check("gate: candidates 启用 httpx",
+      _g['probe_plan']['httpx']['enabled'], True)
+check("gate: candidates 关闭 waf",
+      _g['probe_plan']['waf']['enabled'], False)
+
+_g = gate.assess({'product': 'SomeUnknownProduct', 'run_mode': 'census'},
+                 table=_table)
+check("gate: 显式 census -> census", _g['decision'], 'census')
+check("gate: census 关闭 httpx",
+      _g['probe_plan']['httpx']['enabled'], False)
 
 _g = gate.assess({'product': '', 'affected_ranges': []}, table=_table)
 check("gate: 无产品 -> blocked", _g['decision'], 'blocked')

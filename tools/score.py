@@ -391,11 +391,13 @@ def build_hint(is_waf, version_status, verify_path, verify_path_inferred=False):
     return '需手动确认指纹后再核验' + suffix
 
 
-def classify(match_score, version_status):
+def classify(match_score, version_status, tier=None):
     """四档分类（改进方案 §9.2）。
-    likely_affected 加 version_status == "affected" 护栏：有版本证据但适用性
-    未知（如 context 无可用区间）时最高只到 probable，避免把 unknown 当 affected。"""
-    if match_score >= 80 and version_status == 'affected':
+    likely_affected 需要 tier A：版本命中且版本证据可信度 >= 0.8；
+    低可信度的通用页面正则即使落在区间内，也只到 B/probable。"""
+    if tier is None:
+        tier = 'A' if version_status == 'affected' else 'B'
+    if match_score >= 80 and version_status == 'affected' and tier == 'A':
         return 'likely_affected'
     if match_score >= 60:
         return 'probable'
@@ -451,11 +453,15 @@ def cohort_evidence_kind(fingerprint):
     return ''
 
 
-def classify_tier(version_status, has_strong_evidence):
-    """交付分级：A=版本命中；B=强独立证据但版本未知；C=仅弱证据。
-    与 classification 并存，不改变旧标签。"""
+def classify_tier(version_status, has_strong_evidence, best_reliability=1.0):
+    """交付分级：A=版本命中（需较强版本证据）；B=强独立证据但版本未知；
+    C=仅弱证据。低可信度的通用版本提取（如页面正则）最高只到 B。"""
     if version_status == 'affected':
-        return 'A'
+        try:
+            reliable = float(best_reliability) >= 0.8
+        except (TypeError, ValueError):
+            reliable = False
+        return 'A' if reliable else 'B'
     if has_strong_evidence:
         return 'B'
     return 'C'
@@ -495,15 +501,22 @@ def merge_versions(*version_lists):
 
 def probe_versions_for(probe_rows, product):
     """把 version_probe 输出转成 versions 证据。
-    probe_rows 是同一目标的多条探测记录（可能为空）。"""
+    probe_rows 是同一目标的多条探测记录（可能为空）。
+    可信度使用探测记录里的 confidence（通用页面正则低、专用端点高），
+    不再一律按 0.95 处理。"""
     out = []
     for row in probe_rows or []:
         ver = str(row.get('version') or '').strip()
         if not ver or version_compare.parse_version(ver) is None:
             continue
+        try:
+            reliability = float(row.get('confidence'))
+        except (TypeError, ValueError):
+            reliability = SOURCE_RELIABILITY['version_probe']
+        reliability = max(0.0, min(1.0, reliability))
         out.append({'product': product, 'version': ver,
                     'source': 'version_probe',
-                    'reliability': SOURCE_RELIABILITY['version_probe']})
+                    'reliability': reliability})
     return out
 
 
@@ -786,7 +799,8 @@ def evaluate_rows(raw, httpx_items, cdn_items, waf_rows, context, rules,
         if neg:
             reasons.append('负向词:' + ','.join(n['term'] for n in neg[:5]))
 
-        tier = classify_tier(version_status, strong_evidence)
+        best_reliability = versions[0]['reliability'] if versions else 0.0
+        tier = classify_tier(version_status, strong_evidence, best_reliability)
         if hard_negative:
             tier = 'C'
 
@@ -846,7 +860,7 @@ def evaluate_rows(raw, httpx_items, cdn_items, waf_rows, context, rules,
             'confidence_tier': tier,
             'negative_hits': neg,
             'score_penalty': -penalty,
-            'classification': classify(match_score, version_status),
+            'classification': classify(match_score, version_status, tier),
             'reasons': reasons,
             'evidence': build_evidence(item, hx, versions, version_status,
                                        tested, is_cdn, is_waf, providers),
