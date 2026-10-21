@@ -448,11 +448,14 @@ _GENERIC_BODY_PREFIXES = {
 }
 
 
+# 型号类字符串：同时含 >=2 个字母和 >=2 个数字、以字母开头（如 NBR200V2）。
+# 这类 body 命中是产品身份，不是通用正文关键词。
+_MODEL_LIKE_RE = re.compile(
+    r'^(?=(?:.*[A-Za-z]){2,})(?=(?:.*\d){2,})[A-Za-z][A-Za-z0-9._-]{5,}$')
+
+
 def cohort_evidence_kind(fingerprint):
-    """返回 cohort 证据类型：app/cert/header/title/body-path，无则空串。
-    body= 命中具体资源路径（含 "/"）、Joomla 组件标识（com_/mod_/plg_）或
-    插件专属命名空间前缀（如 wcap_）才算结构性证据；
-    普通文本关键词（如 body="flowsint"）仍视为查询自证。"""
+    """返回 cohort 证据类型：app/cert/header/title/body-path/model，无则空串。"""
     kind = fingerprint_kind(fingerprint)
     if kind in COHORT_EVIDENCE_KINDS:
         return kind
@@ -465,6 +468,8 @@ def cohort_evidence_kind(fingerprint):
             if re.match(r'^[a-z][a-z0-9]{3,}_$', n, re.I) \
                     and n.lower() not in _GENERIC_BODY_PREFIXES:
                 return 'body-path'
+            if _MODEL_LIKE_RE.match(n):
+                return 'model'
     return ''
 
 

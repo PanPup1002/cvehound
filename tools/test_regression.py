@@ -567,6 +567,10 @@ check("cohort_evidence_kind: 插件专属前缀 -> body-path",
       score.cohort_evidence_kind('body="wcap_"'), 'body-path')
 check("cohort_evidence_kind: 通用前缀 wp_ 不算",
       score.cohort_evidence_kind('body="wp_"'), '')
+check("cohort_evidence_kind: 型号字符串 -> model",
+      score.cohort_evidence_kind('body="NBR200V2"'), 'model')
+check("cohort_evidence_kind: 纯版本号不算",
+      score.cohort_evidence_kind('body="v1.2.3"'), '')
 check("cohort_evidence_kind: 普通 body 关键词不计 cohort",
       score.cohort_evidence_kind('body="flowsint"'), '')
 check("tech匹配: Elementor 不归到 Unlimited Elements For Elementor",
@@ -623,6 +627,11 @@ check("cohort: cert= 查询给 30 分 + 标题 10 分",
 check("cohort: cert= 查询 tier B",
       _kept_cert[0]['confidence_tier'], 'B')
 
+check("parse_version: Check Point R81.20",
+      vc.parse_version('R81.20'), (81, 20))
+check("parse_version: v1.2", vc.parse_version('v1.2'), (1, 2))
+check("parse_version: 非版本文本",
+      vc.parse_version('build-abc'), None)
 check("tier: affected -> A",
       score.classify_tier('affected', False), 'A')
 check("tier: affected + 低可信版本 -> B",

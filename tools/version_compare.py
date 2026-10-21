@@ -36,7 +36,7 @@ TODO: 无。精确版本条目已按规则 c 建成退化闭区间（start == en
 
 import re
 
-_LEADING_NUM_RE = re.compile(r'^\s*v?(\d+(?:\.\d+)*)')
+_LEADING_NUM_RE = re.compile(r'^\s*[A-Za-z]?(\d+(?:\.\d+)*)')
 _NORM_RE = re.compile(r'[^a-z0-9]+')
 
 # (cpeMatch 字段名, 归到哪一侧, 该侧是否为闭区间)
@@ -55,6 +55,7 @@ _BOUND_KEYS = (
 def parse_version(value):
     """抽出前导数字版本并转成元组，便于逐段数值比较。
         '2.4.39' -> (2,4,39)   '2.0-beta9' -> (2,0)   'v1.2' -> (1,2)
+        'R81.20' -> (81,20)    （Check Point 等厂商用单字母前缀）
     解析不出来返回 None —— 调用方据此给 unknown，不做任何猜测。"""
     if value is None:
         return None
