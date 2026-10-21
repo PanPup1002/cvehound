@@ -28,6 +28,7 @@ CVE目标获取
 | `tools/waf_batch.py` | wafw00f 分批执行 + 合并（防 OOM/超长单进程） |
 | `tools/census.py` | census 模式资产普查（未探活、未验证） |
 | `tools/fofa_cache.py` | FOFA 导出缓存（避免重复消耗配额） |
+| `tools/pipeline.py` | 直连流水线（NVD/FOFA 官方 API，无需 MCP） |
 | `tools/run_state.py` | 运行清单与断点续跑（阶段产物 sha256） |
 | `tools/scope.py` | 可选授权范围 allowlist（探活+评分双侧强制） |
 | `tools/preflight.py` | 启动前环境检查（preflight=OK / FAIL） |
@@ -105,13 +106,13 @@ CVE目标获取
 
 | 分值 | 证据 |
 |---:|---|
-| +30 | FOFA `app=` / `cert=` / `header=` 指纹引擎命中（强 cohort） |
+| +30 | FOFA `app=` / `cert=` / `header=` 指纹引擎命中；或 `title=` 查询且 live 标题也命中（强 cohort） |
 | +40 | httpx `tech[]` 命中产品（强独立） |
 | +30 | `server` / `X-Powered-By` 命中产品（强独立） |
 | +25 | 有可靠版本号（tech/server/version_probe） |
 | +25 | `version_status == "affected"` |
 | +10 | 标题命中产品（弱） |
-| 0 | 仅"标题非空"；或 `title="X"` 查询的标题命中（查询自证） |
+| 0 | 仅"标题非空"；或 `title="X"` 查询但 live 标题未命中（查询自证） |
 
 `title="X"` 类指纹不再让每条结果自动拿 50 分；纯标题命中会被 40 分门槛挡掉。
 

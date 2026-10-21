@@ -105,10 +105,11 @@ EVIDENCE_WEIGHTS = {
     'title': 10,        # 标题命中产品
 }
 
-# app=/cert=/header= 由 FOFA 的指纹引擎匹配产品身份，属于强 cohort 证据；
-# title=/body= 的普通文本命中与查询自证无法区分，不作为 cohort 证据。
-# 例外：body= 命中具体资源路径（含 "/"）是结构性安装证据，单独计 cohort_path。
-COHORT_EVIDENCE_KINDS = ('app', 'cert', 'header')
+# app=/cert=/header=/title= 由 FOFA 的指纹/标题字段匹配产品身份；
+# 其中 title= 的自证性最强，但对 DAP-1360 这类"标题即产品型号"的设备是唯一
+# 可用信号，因此仍计 cohort 分；普通 body= 文本关键词仍视为查询自证。
+# title= 的 cohort 分要求 live httpx 标题也命中（见评分逻辑），避免只凭索引。
+COHORT_EVIDENCE_KINDS = ('app', 'cert', 'header', 'title')
 MAX_MATCH_SCORE = 100
 
 # 负向词：hard 命中标题即把 tier 封顶为 C；soft/gray 只扣分。
@@ -768,7 +769,11 @@ def evaluate_rows(raw, httpx_items, cdn_items, waf_rows, context, rules,
         reasons = []
         strong_evidence = False
         cohort_kind = cohort_evidence_kind(fingerprint)
-        if cohort_kind:
+        # title= 查询的 cohort 分要求 live 标题也命中（避免只凭 FOFA 索引）；
+        # body-path 是结构性安装证据；app/cert/header 由指纹引擎匹配。
+        cohort_ok = bool(cohort_kind) and (
+            cohort_kind != 'title' or live_title_hit)
+        if cohort_ok:
             weight_key = 'cohort_path' if cohort_kind == 'body-path' else 'cohort'
             match_score += EVIDENCE_WEIGHTS[weight_key]
             strong_evidence = True

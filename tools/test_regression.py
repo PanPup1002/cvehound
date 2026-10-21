@@ -410,8 +410,8 @@ with tempfile.TemporaryDirectory() as _td3:
     _rows = _run_score_full(_td3, '系统登录 · ThinkAdmin',
                             fingerprint='title="ThinkAdmin"',
                             tech=['ThinkAdmin'], httpx_title='ThinkAdmin')
-    check("E2E: tech + live title -> 50",
-          _rows[0]['match_score'] if _rows else None, 50)
+    check("E2E: tech + live title -> 80",
+          _rows[0]['match_score'] if _rows else None, 80)
 
     # tech + 版本命中 -> 100（clamp）+ tier A
     _rows = _run_score_full(_td3, '系统登录 · ThinkAdmin',
@@ -423,6 +423,15 @@ with tempfile.TemporaryDirectory() as _td3:
           _rows[0]['classification'] if _rows else None, 'likely_affected')
     check("E2E: tech + affected -> tier A",
           _rows[0]['confidence_tier'] if _rows else None, 'A')
+
+    # title= 查询：必须 live 标题也命中才计 cohort，否则仍为 0
+    _rows = _run_score_full(_td3, 'DAP-1360 Login',
+                            fingerprint='title="DAP-1360"',
+                            httpx_title='DAP-1360 Login')
+    check("E2E: title= + live 标题命中 -> 40",
+          _rows[0]['match_score'] if _rows else None, 40)
+    check("E2E: title= + live 标题命中 -> tier B",
+          _rows[0]['confidence_tier'] if _rows else None, 'B')
 
 # ======================================================================
 # 11. alive_filter：用 httpx 结果过滤 wafw00f 输入
@@ -547,6 +556,8 @@ check("fofa_title_hit: cert 指纹值参与标题匹配",
                            'Ahsay Online Backup'), True)
 check("cohort_evidence_kind: cert -> cert",
       score.cohort_evidence_kind('cert="Ahsay"'), 'cert')
+check("cohort_evidence_kind: title -> title",
+      score.cohort_evidence_kind('title="DAP-1360"'), 'title')
 check("cohort_evidence_kind: 插件资源路径 -> body-path",
       score.cohort_evidence_kind(
           'body="/wp-content/plugins/divi-plus/"'), 'body-path')

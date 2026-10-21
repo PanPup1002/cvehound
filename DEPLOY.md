@@ -156,6 +156,7 @@ cdncheck -version
 | `tools/waf_batch.py` | wafw00f 分批 | 32 条/批；900s/批 |
 | `tools/census.py` | census 资产普查 | 未探活、未验证 |
 | `tools/fofa_cache.py` | FOFA 导出缓存 | key=query+page+size+fields |
+| `tools/pipeline.py` | 直连流水线（无需 MCP） | NVD/FOFA 官方 API；支持手工区间 |
 | `tools/run_state.py` | 运行清单/断点续跑 | 阶段产物 sha256 |
 
 `score.py` 新增参数：`--version-probe`、`--selection stratified|top`、
