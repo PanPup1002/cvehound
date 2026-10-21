@@ -563,6 +563,10 @@ check("cohort_evidence_kind: 插件资源路径 -> body-path",
           'body="/wp-content/plugins/divi-plus/"'), 'body-path')
 check("cohort_evidence_kind: Joomla 组件标识 -> body-path",
       score.cohort_evidence_kind('body="com_youtubegallery"'), 'body-path')
+check("cohort_evidence_kind: 插件专属前缀 -> body-path",
+      score.cohort_evidence_kind('body="wcap_"'), 'body-path')
+check("cohort_evidence_kind: 通用前缀 wp_ 不算",
+      score.cohort_evidence_kind('body="wp_"'), '')
 check("cohort_evidence_kind: 普通 body 关键词不计 cohort",
       score.cohort_evidence_kind('body="flowsint"'), '')
 check("tech匹配: Elementor 不归到 Unlimited Elements For Elementor",

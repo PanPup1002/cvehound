@@ -144,6 +144,22 @@ hard/soft/gray 扣分；**hard 词命中标题直接把 `confidence_tier` 封顶
 - 缺失/未测记 `reachability=not_tested`、成本 `null`，**绝不默认 direct**。
 - 输出截断默认分层抽样（`--selection stratified`），并写 `*_coverage.json`。
 
+### 直连流水线（MCP 不可用时）
+
+MCP server 掉线或未加载时，可直接用官方 API 跑完整流程：
+
+```bash
+python tools/pipeline.py --cve CVE-XXXX-XXXXX \
+  --product "产品名" --fingerprint 'title="产品"' \
+  [--range START,END[,incl]] [--version-path /readme.txt] \
+  [--country CN] [--run-mode candidates] [--limit 100]
+```
+
+- 直接调用 NVD API 2.0 与 FOFA API，不依赖 `fofa-mcp` / `nvd`；
+- `--range` 用于 NVD `configurationNodes` 为空的 CVE（区间取自公告描述）；
+- FOFA 429/45012 会自动退避重试（60/90 秒）；
+- 与 MCP 流程共用 `probe_inputs` / `httpx` / `version_probe` / `score.py`。
+
 ### 授权范围
 
 提供 scope JSON 后（格式见 `tools/scope.py`），探活与评分两侧强制剔除范围外资产；

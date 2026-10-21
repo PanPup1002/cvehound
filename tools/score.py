@@ -440,9 +440,18 @@ def negative_hits(text, rules):
     return out
 
 
+# 通用命名空间前缀：单独出现不构成插件身份证据。
+_GENERIC_BODY_PREFIXES = {
+    'wp_', 'wc_', 'woo_', 'woocommerce_', 'user_', 'post_', 'term_',
+    'meta_', 'admin_', 'ajax_', 'rest_', 'api_', 'get_', 'set_',
+    'is_', 'has_', 'the_',
+}
+
+
 def cohort_evidence_kind(fingerprint):
-    """返回 cohort 证据类型：app/cert/header/body-path，无则空串。
-    body= 只有命中具体资源路径（含 "/"）才算结构性证据；
+    """返回 cohort 证据类型：app/cert/header/title/body-path，无则空串。
+    body= 命中具体资源路径（含 "/"）、Joomla 组件标识（com_/mod_/plg_）或
+    插件专属命名空间前缀（如 wcap_）才算结构性证据；
     普通文本关键词（如 body="flowsint"）仍视为查询自证。"""
     kind = fingerprint_kind(fingerprint)
     if kind in COHORT_EVIDENCE_KINDS:
@@ -452,6 +461,9 @@ def cohort_evidence_kind(fingerprint):
             n = needle.strip()
             if ('/' in n and len(n) > 8) or re.match(
                     r'^(?:com|mod|plg)_[a-z0-9_]+$', n, re.I):
+                return 'body-path'
+            if re.match(r'^[a-z][a-z0-9]{3,}_$', n, re.I) \
+                    and n.lower() not in _GENERIC_BODY_PREFIXES:
                 return 'body-path'
     return ''
 

@@ -174,8 +174,10 @@ TXT 不变；CSV 前 8 列不变，末尾追加新列。
 - 输出截断默认分层抽样；覆盖率写入 `*_coverage.json`。
 - **census 模式的产出**：`*_census.json/.csv`（只在显式 `run_mode=census` 时生成），
   报告明确写「0 条可验证候选」。
-- 默认大多数 CVE 会走 census。要强制完整流程：在 `tools/version_probes.json`
-  增加该产品的版本端点规则，或在 context.json 设 `"run_mode": "candidates"`。
+- 默认执行探活与评分（candidates）；需要只做普查时在 context.json 设
+  `"run_mode": "census"`。
+- **MCP 不可用时的直连方案**：`tools/pipeline.py` 直接调用 NVD/FOFA 官方 API，
+  用法见 README「直连流水线」。需要 `FOFA_API_KEY`；可选 `NVD_API_KEY` 提高限速。
 
 主动版本探测的安全边界（硬编码）：只发 GET、无认证、无 payload；
 遵守 `--scope`；`--max-targets`/`--max-requests` 限量；可用 `--dry-run` 先看计划。
